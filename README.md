@@ -22,10 +22,10 @@ Tip: Right-click the scale and enable the "Indicator Last Value" option.
 - Added labels to plots for easier identification in Style menu.
 
 **Reference**
-https://www.bitmex.com/app/contract/XBTUSD
-https://www.bitmex.com/app/perpetualContractsGuide#Funding-Rate-Calculations
-*Funding Rate (F) = Premium Index (P) + clamp(Interest Rate (I) - Premium Index (P), 0.05%, -0.05%)*
-Positive funding rate means longs pay shorts. Negative funding rate means shorts pay longs.
+- https://www.bitmex.com/app/contract/XBTUSD
+- https://www.bitmex.com/app/perpetualContractsGuide#Funding-Rate-Calculations
+- *Funding Rate (F) = Premium Index (P) + clamp(Interest Rate (I) - Premium Index (P), 0.05%, -0.05%)*
+- Positive funding rate means longs pay shorts. Negative funding rate means shorts pay longs.
 
 **Indicator Key**
 - Green/Red area: Raw values of the calculated funding rate based on the XBT/USD Premium Index (.XBTUSDPI)
