@@ -1,0 +1,101 @@
+//@version=3
+
+//ref: https://www.bitmex.com/app/contract/XBTUSD
+//ref: https://www.bitmex.com/app/perpetualContractsGuide#Funding-Rate-Calculations
+
+//max_bars_back needed to avoid "out of depth at index" error on 1-min
+study(title="BitMEX Funding [R1984]", shorttitle="BitMEX Funding [R1984]", precision=4, max_bars_back=481)
+
+// inputs
+emaLength = input(title="EMA Length", type=integer, defval=120, minval=10)
+showPayoutMarkers = input(title="Show 8H Funding Payout Markers", type=bool, defval=true)
+//midlineVal now set to interest rate in case BitMEX ever decides to change it
+//midlineVal = input(title="Midline Value", type=integer, defval=0.0001)
+
+// get series set for current period close
+premiumIndexPeriod = security("BITMEX:XBTUSDPI", period, close)
+interestBase = security("BITMEX:XBTBON", period, close)
+interestQuote = security("BITMEX:USDBON", period, close)
+
+// calculate raw funding rate for current period close
+interestRate = (interestQuote - interestBase) / 3
+midlineVal = interestRate
+fundingModifierRaw = interestRate - premiumIndexPeriod
+fundingModifier = (fundingModifierRaw >= 0.0005) ? 0.0005 : (fundingModifierRaw <= -0.0005) ? -0.0005 : fundingModifierRaw
+fundingRateRaw = (premiumIndexPeriod + fundingModifier)
+fundingEma = ema(fundingRateRaw, emaLength)
+
+// get one-minute series for premium index
+premiumIndexClose = security("BITMEX:XBTUSDPI", "1", close)
+premiumIndexOpen = security("BITMEX:XBTUSDPI", "1", open)
+premiumIndexHigh = security("BITMEX:XBTUSDPI", "1", high)
+premiumIndexLow = security("BITMEX:XBTUSDPI", "1", low)
+
+// calculate time-weighted average price (TWAP) of funding rate
+// do not include close in TWAP if this is the current realtime candle
+premiumIndexTwap = if barstate.isrealtime == true
+    (premiumIndexOpen + premiumIndexHigh + premiumIndexLow) / 3
+else
+    (premiumIndexOpen + premiumIndexHigh + premiumIndexLow + premiumIndexClose) / 4
+
+fundingModifierTwapRaw = interestRate - premiumIndexTwap
+fundingModifierTwap = (fundingModifierTwapRaw >= 0.0005) ? 0.0005 : (fundingModifierTwapRaw <= -0.0005) ? -0.0005 : fundingModifierTwapRaw
+fundingRateTwap = premiumIndexTwap + fundingModifierTwap
+
+// calculate funding rate TWAP moving average since last funding payout
+fundingOffsetMinutes = 240
+candleMinuteOfDay = hour * 60 + minute
+candleMinuteOffset = candleMinuteOfDay + fundingOffsetMinutes
+isFundingPayoutCandle = candleMinuteOffset % 480 == 0 ? true : false
+//custom MA loop to calculate predicted funding rate
+lenMax = 480
+sum = premiumIndexTwap[1]
+len = 1
+for i = 0 to lenMax - 1
+    if candleMinuteOffset[i] % 480 == 0
+        break
+    sum := sum + premiumIndexTwap[i + 1]
+    len := len + 1
+premiumIndexTwapMa = sum / len
+fundingModifierTwapMaRaw = interestRate - premiumIndexTwapMa
+fundingModifierTwapMa = (fundingModifierTwapMaRaw >= 0.0005) ? 0.0005 : (fundingModifierTwapMaRaw <= -0.0005) ? -0.0005 : fundingModifierTwapMaRaw
+fundingRateTwapMaRaw = premiumIndexTwapMa + fundingModifierTwapMa
+fundingRateTwapMa = (fundingRateTwapMaRaw >= 0.00375) ? 0.00375 : (fundingRateTwapMaRaw <= -0.00375) ? -0.00375 : fundingRateTwapMaRaw
+
+// set 8H funding rate if next candle is payout
+fundingRate8h = fundingRateTwapMa
+for i = 1 to lenMax
+    if candleMinuteOffset[i-1] % 480 == 0
+        fundingRate8h := fundingRateTwapMa[i]
+        break
+
+// set conditional line and fill colors
+fundingRateRawColor = fundingRateRaw > midlineVal ? green : maroon
+//fundingRateTwapMaColor = fundingRateTwapMa > midlineVal ? lime : (fundingRateTwapMa < midlineVal ? red : gray)
+fundingRateTwapMaColor = fundingRateTwapMa >= midlineVal ? lime : red
+emaColor = fundingRateRaw > fundingEma ? white : silver
+fundingFillColor = fundingRateRaw >= midlineVal ? green : red
+emaFillColor = fundingEma > midlineVal ? white : silver
+fundingRate8hColor = fundingRate8h >= midlineVal ? aqua : orange
+fundingPayoutMarkerColor = fundingRate8h[1] >= midlineVal ? lime : red
+fundingPayoutBackgroundColor = fundingRate8h[1] >= midlineVal ? green : maroon
+
+// plot raw funding series
+plotMidline=plot(series=midlineVal*100, color=white, transp=0, trackprice=true, style=line, title="Midline")
+plotFunding=plot(series=fundingRateRaw*100, color=fundingRateRawColor, transp=0, trackprice=true, style=line, linewidth=1, title="Raw Funding Rate")
+plotEma=plot(series=fundingEma*100, color=emaColor, transp=15, style=circles, linewidth=1, title="Raw Funding EMA")
+
+// plot TWAP MA series (predicted rate)
+plot(fundingRateTwap*100, color=white, transp=33, style=line, title="Funding Rate TWAP")
+plot(fundingRateTwapMa*100, color=fundingRateTwapMaColor, transp=25, trackprice=false, style=line, linewidth=2, title="Predicted Funding Rate MA")
+
+// plot funding payout markers
+plotchar(showPayoutMarkers ? isFundingPayoutCandle : na, title="Payout Marker", char="$", location=location.bottom, color=fundingPayoutMarkerColor, transp=50, size=size.tiny)
+bgcolor(showPayoutMarkers ? (isFundingPayoutCandle ? fundingPayoutBackgroundColor : na) : na, transp=67, title="Payout Marker Background")
+
+// plot 8H funding rate
+plot(fundingRate8h*100, color=fundingRate8hColor, transp=20, style=line, trackprice=true, title="8H Funding Rate")
+
+// add fill
+fill(plot1=plotFunding, plot2=plotMidline, color=fundingFillColor, transp=75, title="Raw Funding Fill")
+fill(plot1=plotEma, plot2=plotMidline, color=emaFillColor, transp=95, title="EMA Fill")
